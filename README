@@ -1,0 +1,294 @@
+
+oathtool –totp $(cat ft_otp.key)
+head -c 32 /dev/urandom | xxd -p
+
+
+-------------
+*** STEPS ***
+-------------
+
+0 - Parse and verify command
+
+1 - Option -g | Verify 64 characters hexadecimal code
+2 - Option -g | Encrypt code with AES-256 
+3 - Option -g | Create ft_otp.key file and write encrypted code in it
+
+4 - Option -k |  
+5 - Option -k |  
+6 - Option -k |  
+7 - Option -k |  
+
+=====================================================================================
+=====================================================================================
+=====================================================================================
+
+---------------
+*** OPENSSL ***
+---------------
+
+We are using OpenSSL for 2 different reasons.
+First to encrypt/decrypt the ftp_otp.key 64 characters hexadecimal code.
+Then, to create the OTP using SHA-???
+
+1 - Encryption / Decryption
+---------------------------
+
+
+
+2 - OTP
+-------
+
+
+
+=====================================================================================
+=====================================================================================
+=====================================================================================
+
+---------------------
+*** ILLUSTRATIONS ***
+---------------------
+
+Basics
+------
+
+Let's use this 64 characters long hexadecimal code :
+
+   8005BDA3BCBF0286EC5136FC1BE3A8C2ACE5335B344FA589DEFC6D0EC97EE456
+
+This code is hexadecimal, so each character is in base 16 [0123456789abcdef]. So for each character, we have these min/max possible numbers:
+
+         | DEC   | HEX    | BIN
+   from  | 0     | 0      | 0000 
+   to    | 16    | f      | 1111
+
+Here, because we are using hexadecimal, 1 character can not be more than 4 bits, or half a byte (octet). Therefore, this 64 hexadecimal code is 32 bytes long.
+
+For our code, the first byte is 80, because 8 = 1000 and 0 = 0000, or 80 = 1000 0000. 
+That's why we often see hexa code like this (wireshark for example):
+
+   80 05 BD A3 BC BF 02 86   EC 51 36 FC 1B E3 A8 C2 
+   AC E5 33 5B 34 4F A5 89   DE FC 6D 0E C9 7E E4 56 -> 2 groups of 8 bytes -> 16 bytes
+
+HMAC and HOTP use binary data, so we will have to convert this string into raw byte array:
+
+   uint8_t key[32] = { 0x80, 0x05, 0xBD, 0xA3, ... };
+   \             /     \  /
+      uint8_t =         0x =
+      unsigned int      hex value
+      byte unit         in binary
+
+
+AES Encryption
+--------------
+
+Advanced Encyption Standard (AES) is a standardize encryption method which is known for being very strong.
+
+There are 3 types of AES encryption: AES-128, AES-192 and AES-256
+
+We are using here the AES-256 because 256 is for number of bits, and our code is 32 bytes * 8 bits = 256 bits.
+
+
+AES is a block cypher, it means that it encrypts data in fixed sized chunks, generally by 16 bytes.
+
+CBC: Cipher Block Chaining is a widely used and secure operation method.
+
+IV: Initial Vector. This is a block of random and unique data used to make encryption non-deterministic. IV is not secret.
+
+AES block and IV block should be the same size.
+
+If: 
+   P1 = 1st block of plaitext
+   IV = Initial Vector
+   K  = key
+   C  = cyphered element
+   XOR= eXclusive OR binary operation (reversible)
+
+Encryption will occur like this:
+   C1 = AES_encrypt(P1 XOR IV, K)
+   C2 = AES_encrypt(P2 XOR C1, K)
+   C3 = AES_encrypt(P3 XOR C2, K)
+   ...
+
+
+The IV need to be randomized for security reasons, so we use the RAND_bytes() OpenSSL function to generate new IV each time we have to use it.
+
+
+=====================================================================================
+=====================================================================================
+=====================================================================================
+
+---------------------------------
+*** RFC 4226 - HOTP Algorithm ***
+---------------------------------
+
+---------------------------
+4.  Algorithm Requirements
+---------------------------
+
+   This section presents the main requirements that drove this algorithm
+   design.  A lot of emphasis was placed on end-consumer usability as
+   well as the ability for the algorithm to be implemented by low-cost
+   hardware that may provide minimal user interface capabilities.  In
+   particular, the ability to embed the algorithm into high-volume SIM
+   and Java cards was a fundamental prerequisite.
+
+   R1 - The algorithm MUST be sequence- or counter-based: one of the
+   goals is to have the HOTP algorithm embedded in high-volume devices
+   such as Java smart cards, USB dongles, and GSM SIM cards.
+
+   R2 - The algorithm SHOULD be economical to implement in hardware by
+   minimizing requirements on battery, number of buttons, computational
+   horsepower, and size of LCD display.
+
+   R3 - The algorithm MUST work with tokens that do not support any
+   numeric input, but MAY also be used with more sophisticated devices
+   such as secure PIN-pads.
+
+   R4 - The value displayed on the token MUST be easily read and entered
+   by the user: This requires the HOTP value to be of reasonable length.
+
+   The HOTP value must be at least a 6-digit value.  It is also
+   desirable that the HOTP value be 'numeric only' so that it can be
+   easily entered on restricted devices such as phones.
+
+   R5 - There MUST be user-friendly mechanisms available to
+   resynchronize the counter.  Section 7.4 and Appendix E.4 details the
+   resynchronization mechanism proposed in this document
+
+   R6 - The algorithm MUST use a strong shared secret.  The length of
+   the shared secret MUST be at least 128 bits.  This document
+   RECOMMENDs a shared secret length of 160 bits.
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+-------------------   
+5.  HOTP Algorithm
+-------------------
+
+   In this section, we introduce the notation and describe the HOTP
+   algorithm basic blocks -- the base function to compute an HMAC-SHA-1
+   value and the truncation method to extract an HOTP value.
+
+
+5.1.  Notation and Symbols
+---------------------------
+
+   A string always means a binary string, meaning a sequence of zeros
+   and ones.
+
+   If s is a string, then |s| denotes its length.
+
+   If n is a number, then |n| denotes its absolute value.
+
+   If s is a string, then s[i] denotes its i-th bit.  We start numbering
+   the bits at 0, so s = s[0]s[1]...s[n-1] where n = |s| is the length
+   of s.
+
+   Let StToNum (String to Number) denote the function that as input a
+   string s returns the number whose binary representation is s. (For
+   example, StToNum(110) = 6.)
+
+   Here is a list of symbols used in this document.
+
+   Symbol  Represents
+   -------------------------------------------------------------------
+   C       8-byte counter value, the moving factor.  This counter
+           MUST be synchronized between the HOTP generator (client)
+           and the HOTP validator (server).
+
+   K       shared secret between client and server; each HOTP
+           generator has a different and unique secret K.
+
+   T       throttling parameter: the server will refuse connections
+           from a user after T unsuccessful authentication attempts.
+
+   s       resynchronization parameter: the server will attempt to
+           verify a received authenticator across s consecutive
+           counter values.
+
+   Digit   number of digits in an HOTP value; system parameter.
+
+
+5.2.  Description
+------------------
+
+   The HOTP algorithm is based on an increasing counter value and a
+   static symmetric key known only to the token and the validation
+   service.  In order to create the HOTP value, we will use the HMAC-
+   SHA-1 algorithm, as defined in RFC 2104 [BCK2].
+
+   As the output of the HMAC-SHA-1 calculation is 160 bits, we must
+   truncate this value to something that can be easily entered by a
+   user.
+
+                   HOTP(K,C) = Truncate(HMAC-SHA-1(K,C))
+
+   Where:
+
+     - Truncate represents the function that converts an HMAC-SHA-1
+       value into an HOTP value as defined in Section 5.3.
+
+   The Key (K), the Counter (C), and Data values are hashed high-order
+   byte first.
+
+   The HOTP values generated by the HOTP generator are treated as big
+   endian.
+
+
+5.3.  Generating an HOTP Value
+-------------------------------
+
+   We can describe the operations in 3 distinct steps:
+
+   Step 1: Generate an HMAC-SHA-1 value Let HS = HMAC-SHA-1(K,C)  // HS
+   is a 20-byte string
+
+   Step 2: Generate a 4-byte string (Dynamic Truncation)
+   Let Sbits = DT(HS)   //  DT, defined below,
+                        //  returns a 31-bit string
+
+   Step 3: Compute an HOTP value
+   Let Snum  = StToNum(Sbits)   // Convert S to a number in
+                                    0...2^{31}-1
+   Return D = Snum mod 10^Digit //  D is a number in the range
+                                    0...10^{Digit}-1
+
+
+5.4.  Example of HOTP Computation for Digit = 6
+-----------------------------------------------
+
+   The following code example describes the extraction of a dynamic
+   binary code given that hmac_result is a byte array with the HMAC-
+   SHA-1 result:
+
+        int offset   =  hmac_result[19] & 0xf ;
+        int bin_code = (hmac_result[offset]  & 0x7f) << 24
+           | (hmac_result[offset+1] & 0xff) << 16
+           | (hmac_result[offset+2] & 0xff) <<  8
+           | (hmac_result[offset+3] & 0xff) ;
+
+   SHA-1 HMAC Bytes (Example)
+
+   -------------------------------------------------------------
+   | Byte Number                                               |
+   -------------------------------------------------------------
+   |00|01|02|03|04|05|06|07|08|09|10|11|12|13|14|15|16|17|18|19|
+   -------------------------------------------------------------
+   | Byte Value                                                |
+   -------------------------------------------------------------
+   |1f|86|98|69|0e|02|ca|16|61|85|50|ef|7f|19|da|8e|94|5b|55|5a|
+   -------------------------------***********----------------++|
+
+   * The last byte (byte 19) has the hex value 0x5a.
+   * The value of the lower 4 bits is 0xa (the offset value).
+   * The offset value is byte 10 (0xa).
+   * The value of the 4 bytes starting at byte 10 is 0x50ef7f19,
+     which is the dynamic binary code DBC1.
+   * The MSB of DBC1 is 0x50 so DBC2 = DBC1 = 0x50ef7f19 .
+   * HOTP = DBC2 modulo 10^6 = 872921.
+
+   We treat the dynamic binary code as a 31-bit, unsigned, big-endian
+   integer; the first byte is masked with a 0x7f.
+
+   We then take this number modulo 1,000,000 (10^6) to generate the 6-
+   digit HOTP value 872921 decimal.

@@ -1,0 +1,253 @@
+AES and HOTP use binary data, so we will have to convert this string into raw byte array:
+
+   uint8_t key[32] = { 0x80, 0x05, 0xBD, 0xA3, ... };
+   \             /     \  /
+      uint8_t =         0x =
+      unsigned int      hex value
+      byte unit         in binary
+
+
+AES Encryption
+--------------
+
+Advanced Encyption Standard (AES) is a standardize encryption method which is known for being very strong.
+
+There are 3 types of AES encryption: AES-128, AES-192 and AES-256
+
+We are using here the AES-256 because 256 is for number of bits, and our code is 32 bytes * 8 bits = 256 bits.
+
+
+AES is a block cypher, it means that it encrypts data in fixed sized chunks, generally by 16 bytes.
+
+CBC: Cipher Block Chaining is a widely used and secure operation method.
+
+IV: Initial Vector. This is a block of random and unique data used to make encryption non-deterministic. IV is not secret.
+
+AES block and IV block should be the same size.
+
+If: 
+   P1 = 1st block of plaitext
+   IV = Initial Vector
+   K  = key
+   C  = cyphered element
+   XOR= eXclusive OR binary operation (reversible)
+
+Encryption will occur like this:
+   C1 = AES_encrypt(P1 XOR IV, K)
+   C2 = AES_encrypt(P2 XOR C1, K)
+   C3 = AES_encrypt(P3 XOR C2, K)
+   ...
+
+
+The IV need to be randomized for security reasons, so we use the RAND_bytes() OpenSSL function to generate new IV each time we have to use it.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Padding for PKCS#7
+int pad(unsigned char *input, int len) {
+	int pad_len = BLOCK_SIZE - (len % BLOCK_SIZE);
+	for (int i = len; i < len + pad_len; ++i) {
+		input[i] = pad_len;
+	}
+	return len + pad_len;
+}
+
+// Remove PKCS#7 padding
+int unpad(unsigned char *input, int len) {
+	int pad_len = input[len - 1];
+	if (pad_len < 1 || pad_len > BLOCK_SIZE)
+		return -1;
+	for (int i = len - pad_len; i < len; ++i) {
+		if (input[i] != pad_len) return -1;
+	}
+	return len - pad_len;
+}
+
+// AES-256-CBC encryption
+void aes_encrypt(const char *hex_key) {
+	unsigned char key[32];
+	hex_to_bytes(hex_key, key, 32);
+
+	unsigned char iv[BLOCK_SIZE] = "my_static_iv__16"; // 16 bytes
+	unsigned char plaintext[64] = "This is a test OTP string.";
+	int original_len = strlen((char *)plaintext);
+	int padded_len = pad(plaintext, original_len);
+
+	unsigned char ciphertext[128];
+	unsigned char buffer[BLOCK_SIZE];
+
+	AES_KEY enc_key;
+	AES_set_encrypt_key(key, 256, &enc_key);
+
+	for (int i = 0; i < padded_len; i += BLOCK_SIZE) {
+		// XOR block with IV or previous ciphertext
+		for (int j = 0; j < BLOCK_SIZE; ++j)
+			buffer[j] = plaintext[i + j] ^ iv[j];
+
+		AES_encrypt(buffer, ciphertext + i, &enc_key);
+		memcpy(iv, ciphertext + i, BLOCK_SIZE); // update IV
+	}
+
+	printf("Encrypted (hex): ");
+	for (int i = 0; i < padded_len; ++i)
+		printf("%02x", ciphertext[i]);
+	printf("\n");
+}
+
+// AES-256-CBC decryption
+void aes_decrypt(const char *hex_key) {
+	unsigned char key[32];
+	hex_to_bytes(hex_key, key, 32);
+
+	// Example ciphertext (output from aes_encrypt)
+	unsigned char ciphertext[] = {
+		0x35, 0x02, 0x3e, 0x42, 0x47, 0xb1, 0x2d, 0x1a,
+		0x29, 0x55, 0xc5, 0x40, 0xe3, 0x38, 0x32, 0x0e,
+		0x45, 0x2a, 0xe2, 0x19, 0x97, 0x8f, 0x90, 0x8a,
+		0x90, 0x50, 0x6c, 0xd2, 0xf5, 0x89, 0xd2, 0xbe
+	};
+	int ciphertext_len = sizeof(ciphertext);
+
+	unsigned char iv[BLOCK_SIZE] = "my_static_iv__16"; // must match encryption
+	unsigned char plaintext[128];
+	unsigned char buffer[BLOCK_SIZE], previous[BLOCK_SIZE];
+
+	AES_KEY dec_key;
+	AES_set_decrypt_key(key, 256, &dec_key);
+
+	for (int i = 0; i < ciphertext_len; i += BLOCK_SIZE) {
+		memcpy(previous, iv, BLOCK_SIZE);             // store current IV
+		memcpy(iv, ciphertext + i, BLOCK_SIZE);        // prepare next IV
+
+		AES_decrypt(ciphertext + i, buffer, &dec_key);
+
+		// XOR with IV (or previous ciphertext block)
+		for (int j = 0; j < BLOCK_SIZE; ++j)
+			plaintext[i + j] = buffer[j] ^ previous[j];
+	}
+
+	int final_len = unpad(plaintext, ciphertext_len);
+	if (final_len < 0) {
+		printf("Invalid padding.\n");
+		return;
+	}
+
+	plaintext[final_len] = '\0';
+	printf("Decrypted: %s\n", plaintext);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////
+
+
+// Helper: Convert 64-char hex to 32-byte key
+void hex_to_bytes(const char *hex, unsigned char *bytes, size_t len) {
+    for (size_t i = 0; i < len; ++i)
+        sscanf(hex + 2 * i, "%2hhx", &bytes[i]);
+}
+
+// Encrypt a static string and print ciphertext (hex)
+void aes_encrypt(const char *hex_key) {
+    unsigned char iv[AES_BLOCK_SIZE];
+    if (!generate_random_iv(iv, AES_BLOCK_SIZE)) {
+        fprintf(stderr, "Failed to generate IV\n");
+        return 1;
+    }
+
+    unsigned char key[32];
+    hex_to_bytes(hex_key, key, 32);
+
+    const unsigned char *plaintext = (unsigned char *)"This is a test OTP string.";
+    unsigned char ciphertext[128];
+    int len, ciphertext_len;
+
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+
+    EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, strlen((char *)plaintext));
+    ciphertext_len = len;
+
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+    ciphertext_len += len;
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    printf("Encrypted (hex): ");
+    for (int i = 0; i < ciphertext_len; i++)
+        printf("%02x", ciphertext[i]);
+    printf("\n");
+}
+
+
+
+
+
+
+// Decrypt a static ciphertext and print plaintext
+void aes_decrypt(const char *hex_key) {
+    unsigned char key[32];
+    unsigned char iv[16] = "static_iv_16byte"; // Must match the IV used in encryption
+
+    // This must be replaced with your actual ciphertext output
+    unsigned char ciphertext[] = {
+        0x13, 0x5b, 0x8e, 0xf4, 0x2a, 0xb3, 0xc4, 0x66,
+        0x21, 0x82, 0x0f, 0x79, 0x7c, 0x1b, 0x76, 0x1d,
+        0x2a, 0x99, 0x1f, 0x62, 0x47, 0x0e, 0xdd, 0x0b,
+        0xac, 0xb3, 0x18, 0x94, 0x9a, 0x51, 0x5d, 0xf3
+    };
+    int ciphertext_len = sizeof(ciphertext);
+
+    unsigned char plaintext[128];
+    int len, plaintext_len;
+
+    hex_to_bytes(hex_key, key, 32);
+
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+
+    EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len);
+    plaintext_len = len;
+
+    EVP_DecryptFinal_ex(ctx, plaintext + len, &len);
+    plaintext_len += len;
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    plaintext[plaintext_len] = '\0';
+    printf("Decrypted: %s\n", plaintext);
+}
+
+
+int generate_random_iv(unsigned char *iv, int iv_len) {
+    if (iv_len != AES_BLOCK_SIZE)
+        return 0;
+
+    // Fill the IV buffer with secure random bytes
+    if (RAND_bytes(iv, iv_len) != 1)
+        return 0;
+    return 1;
+}
