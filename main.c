@@ -4,83 +4,39 @@
 // OPTIONS //
 ////////////////////////////////////////////////////////////////
 
-
-// -gen key.hex file option
-void g_option(char *str, key *key) {
-    char *hex64key;
+void g_option(const char *str) {
     FILE *file = fopen(str, "r");
-    
-    if (!file) {
-        if (is_valid_key(str) == false) {
-            printf("Error: The key you provided is not valid. It must contain 64 caracters and be hexadecimal.\n");
-            return;
-        }
-        hex64key = str;
-    }
-    else {
-        char buffer[64];
-        size_t read = fread(buffer, 1, sizeof(buffer), file);
+    char buffer[MAX_KEY_LENGTH + 1];
 
-        if (read != sizeof(buffer)) {
-            fprintf(stderr, "Could not read full data\n");
-            return;
-        } else {
-            buffer[read] = '\0';
-            if (is_valid_key(buffer) == false)
-                return;                    
-            hex64key = buffer;
-            fclose(file);
-        }
-    }
-    create_keyfile(hex64key, key);
-}
-
-// -path option
-void k_q_option(char *str, char opt, key *key) {
-    char *hex64key;
-    if (strcmp(str, "ft_otp.key") != 0) {
-        perror("Error: No 64 character hexadecimal key available");
-    }
-
-    FILE *file = fopen(str, "r");
-    if (!file) {
-        perror("Error: No 64 character hexadecimal key available");
+    if (file) {
+        size_t read = fread(buffer, 1, MAX_KEY_LENGTH, file);
+        buffer[read] = '\0';
+        fclose(file);
+        create_keyfile(buffer);
+    } else if (is_valid_key((char *)str)) {
+        create_keyfile(str);
     } else {
-        char buffer[64];
-        size_t read = fread(buffer, 1, sizeof(buffer), file);
-
-        if (read != sizeof(buffer)) {
-            fprintf(stderr, "Could not read full data\n");
-            return;
-        }
-        else {
-            buffer[read] = '\0';
-            if (is_valid_key(buffer) == false) {
-                printf("The key you provided is not valid. It must contain 64 caracters and be hexadecimal.\n");
-                return;
-            }
-            hex64key = buffer;
-            fclose(file);
-        }
+        fprintf(stderr, "Error: Provided key is invalid or file not found.\n");
     }
+}
+
+void k_q_option(char opt) {
     if (opt == 'k')
-        generate_totp(hex64key, key);
-    else
-    generate_qr(hex64key, key);
+        generate_totp();
+    else if (opt == 'q')
+        generate_qr();
 }
 
-void    get_opt(int ac, char **av) {
-    for (int i = 1; i < ac; i++) {
-        key *key;
-        if (strcmp(av[i], "-g") == 0)
-            g_option(av[i + 1], key);
-        else if (strcmp(av[i], "-k") == 0)
-            k_q_option(av[i + 1], 'k', key);
-        else if (strcmp(av[i], "-qr") == 0)
-            k_q_option(av[i + 1], 'q', key);
+void get_opt(int ac, char **av) {
+    if (ac < 3) return;
+    if (strcmp(av[1], "-g") == 0) {
+        g_option(av[2]);
+    } else if (strcmp(av[1], "-k") == 0) {
+        k_q_option('k');
+    } else if (strcmp(av[1], "-qr") == 0) {
+        k_q_option('q');
     }
 }
-
 
 //////////////////////////////////////////////////////////////
 // MAIN //
@@ -88,7 +44,7 @@ void    get_opt(int ac, char **av) {
 
 int main(int ac, char **av) {
     if (ac != 3) {
-        fprintf(stderr, "Usage: ./ft_otp [-g <filename>] or [-k ft_otp.key]\n"); 
+        fprintf(stderr, "Usage: ./ft_otp [-g <filename>] or [-k <key>] or [-qr <key>]\n"); 
         return 1;
     }
     get_opt(ac, av);

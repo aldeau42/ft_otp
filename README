@@ -1,6 +1,13 @@
+--------------
+*** LAUNCH ***
+--------------
 
-oathtool –totp $(cat ft_otp.key)
+
+
+oathtool --totp $(cat ft_otp.key)
 head -c 32 /dev/urandom | xxd -p
+
+
 
 
 -------------
@@ -78,22 +85,72 @@ HMAC and HOTP use binary data, so we will have to convert this string into raw b
       byte unit         in binary
 
 
+Counter
+-------
+
+unsigned char counter_bytes[8];
+for (int i = 7; i >= 0; i--) {
+    counter_bytes[i] = counter & 0xFF;
+    counter >>= 8;
+}
+
+Big-endian order is the format explicitly named to match the RFC 4226 (HOTP)
+Big-endian is the network byte order used in most protocols (e.g., TCP/IP).  
+We parse the counter from the least significant byte (from right to left) and move by byte with ">>= 8".
+
+For a decimal counter 123456, we have:
+   -----------------------------------------------------------------------------
+   DEC      |  HEX                     |  BIN
+   -----------------------------------------------------------------------------
+   123456   | 5x[00] 01 E2 40          | 5x[00000000] 00000001 11100010 01000000
+   -----------------------------------------------------------------------------
+            | 0x40 & 0xFF              | 01000000 & 11111111 = 01000000     >>=
+            | 0xE2 & 0xFF              | 11100010 & 11111111 = 11100010     >>=
+            | 0x01 & 0xFF              | 00000001 & 11111111 = 11100010     >>=
+            | 0x00 & 0xFF              | 00000000 & 11111111 = 00000000     >>=
+            | ...                      | ...                                ...
+   -----------------------------------------------------------------------------
+
+
+
+HMAC-SHA1
+---------
+
+NIST: https://csrc.nist.gov/files/pubs/fips/198/final/docs/fips-198a.pdf
+
+HMAC: Hash-based Message Authentication Code
+SHA1: Secure Hash Algorithm 1
+
+SHA-1 hash function produces 160-bit (20 bytes) long hash.
+
+
+HMAC(K, C) = SHA1((K' XOR opad) || SHA1((K' XOR ipad) || C))
+
+    K is the key (your binary secret key).
+    C is the counter (moving factor).
+    || is concatenation.
+    ipad and opad are fixed byte paddings.
+
+
+
+Dynamic Truncation
+------------------
+
+>>> RFC 4226 - 5.4
+
+
+
+
 AES Encryption
 --------------
 
 Advanced Encyption Standard (AES) is a standardize encryption method which is known for being very strong.
-
 There are 3 types of AES encryption: AES-128, AES-192 and AES-256
-
 We are using here the AES-256 because 256 is for number of bits, and our code is 32 bytes * 8 bits = 256 bits.
-
-
 AES is a block cypher, it means that it encrypts data in fixed sized chunks, generally by 16 bytes.
 
 CBC: Cipher Block Chaining is a widely used and secure operation method.
-
 IV: Initial Vector. This is a block of random and unique data used to make encryption non-deterministic. IV is not secret.
-
 AES block and IV block should be the same size.
 
 If: 
@@ -109,7 +166,6 @@ Encryption will occur like this:
    C3 = AES_encrypt(P3 XOR C2, K)
    ...
 
-
 The IV need to be randomized for security reasons, so we use the RAND_bytes() OpenSSL function to generate new IV each time we have to use it.
 
 
@@ -117,9 +173,9 @@ The IV need to be randomized for security reasons, so we use the RAND_bytes() Op
 =====================================================================================
 =====================================================================================
 
----------------------------------
-*** RFC 4226 - HOTP Algorithm ***
----------------------------------
+-------------------------------------------
+*** RFC 4226 - HOTP Algorithm (snippet) ***
+-------------------------------------------
 
 ---------------------------
 4.  Algorithm Requirements
